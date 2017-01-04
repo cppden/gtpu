@@ -1,0 +1,48 @@
+
+language: cpp
+
+branches:
+  except: /pr\/.*/
+
+script:
+  - mkdir build
+  - cd build
+  - cmake .. && make V=1 -j check
+  
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install -y libgtest-dev
+  # what a nice bug wasted 3 hours of my life...
+  - (mkdir -p /tmp/gtest && cd /tmp/gtest && cmake -DCMAKE_BUILD_TYPE=RELEASE /usr/src/gtest && make && sudo mv libg* /usr/lib/)
+
+install:
+  - export CXX="$COMPILER"
+  - export CC=`echo $COMPILER | sed -e 's/^g++/gcc/' -e 's/^clang++/clang/'`
+
+matrix:
+  include:
+    - compiler: gcc
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-6
+      env:
+        - COMPILER=g++-6
+
+    - compiler: clang
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-precise-3.8
+          packages:
+            - g++-6
+            - clang-3.8
+      env:
+        - COMPILER=clang++-3.8
+
+notifications:
+  email: false
+

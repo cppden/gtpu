@@ -1,3 +1,19 @@
+#automake tools
+Makefile.in
+aclocal.m4
+ar-lib
+autom4te.cache/
+compile
+config.guess
+config.sub
+configure
+depcomp
+install-sh
+m4/
+missing
+test-driver
+build/
+
 # Compiled Object files
 *.slo
 *.lo
@@ -13,10 +29,6 @@
 *.dylib
 *.dll
 
-# Fortran module files
-*.mod
-*.smod
-
 # Compiled Static libraries
 *.lai
 *.la
@@ -27,3 +39,13 @@
 *.exe
 *.out
 *.app
+
+#project files
+.codelite/
+Debug/
+Release/
+build/
+*.workspace
+*.mk
+*.project
+Makefile

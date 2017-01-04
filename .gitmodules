@@ -1,0 +1,3 @@
+[submodule "med"]
+	path = med
+	url = https://github.com/cppden/med
