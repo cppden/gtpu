@@ -85,23 +85,21 @@ Optional fields:
 */
 struct sequence_number : med::value<16>
 {
-	//static constexpr uint8_t bit = version_flags::S;
 	static constexpr char const* name() { return "Sequence Number"; }
 };
 
 struct npdu_number : med::value<8>
 {
-	//static constexpr uint8_t bit = version_flags::NP;
 	static constexpr char const* name() { return "N-PDU Number"; }
 };
 
-struct next_eh_type : med::value<8>
-{
-	//static constexpr uint8_t bit = version_flags::E;
-	//static constexpr char const* name() { return "Next Extension Header Type"; }
-};
-
 namespace ext {
+
+//Figure 5.2.1-3: Definition of Extension Header Type
+struct header_type : med::value<8>
+{
+	static constexpr char const* name() { return "Extension Header Type"; }
+};
 
 /*
 5.2	GTP-U Extension Header
@@ -118,43 +116,19 @@ Oct
    1 | Extension Header Length    |
  2-m | Extension Header Content   |
  m+1 | Next Extension Header Type |
+
 */
 
-enum type_e : uint8_t
-{
-	/*
-	 * next extension header type
-	 * Figure 5.2.1-3: Definition of Extension Header Type
-	 */
-	RESERVED1_CP = 0b00000001,
-	RESERVED2_CP = 0b00000010,
-	RESERVED3_CP = 0b11000001,
-	RESERVED4_CP = 0b11000010,
-	//NOTE: RESERVED#_CP are not used in UP and defined in 3GPP TS 29.060
-
-	/*
-	 * next extension header type comprehension bits:
-	 * Figure 5.2.1-2: Definition of bits 7 and 8 of the Extension Header Type
-	 */
-	CBITS   = 0b11000000,
-	NR_FWD  = 0b00000000,
-	NR_DROP = 0b01000000,
-	R_FWD   = 0b10000000,
-	R       = 0b11000000,
-};
-
-//Comprehension of this extension header is not required.
-//An Intermediate Node shall forward it to any Receiver Endpoint.
-constexpr bool not_required_forward(uint8_t eh_type)    { return NR_FWD == (eh_type & CBITS); }
-//Comprehension of this extension header is not required. An Intermediate Node shall discard the Extension Header
-//Content and not forward it to any Receiver Endpoint. Other extension headers shall be treated independently of
-//this extension header.
-constexpr bool not_required_discard(uint8_t eh_type)    { return NR_DROP == (eh_type & CBITS); }
+/*
+ * next extension header type comprehension bits:
+ * Figure 5.2.1-2: Definition of bits 7 and 8 of the Extension Header Type
+ */
 //Comprehension of this extension header is required by the Endpoint Receiver but not by an Intermediate Node.
-//An Intermediate Node shall forward the whole field to the Endpoint Receiver.
-constexpr bool required_forward(uint8_t eh_type)        { return R_FWD == (eh_type & CBITS); }
-//Comprehension of this header type is required by recipient.
-constexpr bool required(uint8_t eh_type)                { return R == (eh_type & CBITS); }
+constexpr bool required(uint8_t eh_type)    { return 0 != (eh_type & 0b10000000); }
+
+//true: An Intermediate Node shall forward it to any Receiver Endpoint.
+//false: shall discard the Extension Header Content and not forward it to any Receiver Endpoint.
+constexpr bool forward(uint8_t eh_type)     { return 0 == (eh_type & 0b01000000); }
 
 struct no_more : med::empty
 {
@@ -195,8 +169,7 @@ struct udp_port_number : med::value<16>
 };
 struct udp_port : med::sequence<
 	med::placeholder::_length<>,
-	M< udp_port_number >,
-	M< next_eh_type >
+	M< udp_port_number >
 >
 {
 	static constexpr uint8_t id = 0b01000000;
@@ -225,8 +198,7 @@ struct pdcp_pdu_number : med::value<16>
 };
 struct pdcp_pdu : med::sequence<
 	med::placeholder::_length<>,
-	M< pdcp_pdu_number >,
-	M< next_eh_type >
+	M< pdcp_pdu_number >
 >
 {
 	static constexpr uint8_t id = 0b11000000;
@@ -262,8 +234,7 @@ struct long_pdcp_pdu_number : med::value<24>
 };
 struct long_pdcp_pdu : med::sequence<
 	med::placeholder::_length<>,
-	M< long_pdcp_pdu_number >,
-	M< next_eh_type >
+	M< long_pdcp_pdu_number >
 >
 {
 	static constexpr uint8_t id = 0b10000010;
@@ -319,8 +290,7 @@ struct sci_value : med::value<8>
 };
 struct sci : med::sequence<
 	med::placeholder::_length<>,
-	M< sci_value >,
-	M< next_eh_type >
+	M< sci_value >
 >
 {
 	static constexpr uint8_t id = 0b00100000;
@@ -347,8 +317,7 @@ struct container_data : med::octet_string<>
 };
 struct ran_container : med::sequence<
 	med::placeholder::_length<>,
-	M< container_data >,
-	M< next_eh_type >
+	M< container_data >
 >
 {
 	static constexpr uint8_t id = 0b10000001;
@@ -358,7 +327,7 @@ struct ran_container : med::sequence<
 	uint8_t const* data() const                 { return this->get<container_data>().data(); }
 };
 
-struct header : med::choice< next_eh_type
+struct header : med::choice< header_type
 	, CASE< no_more >
 	, CASE< udp_port >
 	, CASE< pdcp_pdu >
@@ -367,8 +336,29 @@ struct header : med::choice< next_eh_type
 	, CASE< ran_container >
 >
 {
-	using length = med::length_t<ext::length>;
+	using length_type = ext::length;
 	using padding = med::padding<4*8>; //pad to 4 octets
+#ifdef CODEC_TRACE_ENABLE
+	static constexpr char const* name() { return "Extension Header"; }
+#endif
+};
+
+struct next_header : header
+{
+	struct has_next
+	{
+		template <class IES>
+		bool operator()(IES const& ies) const
+		{
+			auto& me = ies.template as<next_header>();
+			CODEC_TRACE("%sheader", me.empty() ? "":"next_");
+			//if no chain then check ext::header otherwise look into the last ext::next_header
+			//if previous next_eh_type wasn't no_more then we need one more next_eh_type
+			return nullptr == (me.empty()
+				? ies.template as<header>().ref_field().template get<no_more>()
+				: me.last()->template get<no_more>());
+		}
+	};
 };
 
 } //end: namespace ext
@@ -402,7 +392,6 @@ struct version_flags : med::value<8>
 		template <class HDR>
 		bool operator()(HDR const& hdr) const
 		{
-//			return static_cast<version_flags const&>(hdr).get() & (E|S|NP);
 			return hdr.template as<version_flags>().get() & (E|S|NP);
 		}
 	};
@@ -414,19 +403,19 @@ struct version_flags : med::value<8>
 		{
 			auto& eh = ies.template as<ext::header>();
 			auto& sn = ies.template as<sequence_number>();
-			auto& pn = ies.template as<npdu_number>();
+			auto& np = ies.template as<npdu_number>();
 			auto const vf =
 				(1 << 5) | //version = 1
 				PT | //protocol type = 1 (GTPU)
-				(eh.is_set() ? E:0)|
-				(sn.is_set() ? S:0)|
-				(pn.is_set() ? NP:0);
+				(eh.is_set() ? E:0) |
+				(sn.is_set() ? S:0) |
+				(np.is_set() ? NP:0);
 
 			if (vf & (E|S|NP)) //clear fields not set
 			{
 				if (!eh.is_set()) eh.template ref<ext::no_more>();
 				if (!sn.is_set()) sn.set(0);
-				if (!pn.is_set()) pn.set(0);
+				if (!np.is_set()) np.set(0);
 			}
 
 			ies.template as<version_flags>().set_encoded(vf);
@@ -476,8 +465,8 @@ struct header : med::sequence<
 	M< teid >,
 	O< sequence_number, version_flags::has_ext_fields >,
 	O< npdu_number, version_flags::has_ext_fields >,
-	//TODO: support chained extended headers
-	O< ext::header, version_flags::has_ext_fields >
+	O< ext::header, version_flags::has_ext_fields >,
+	O< ext::next_header, ext::next_header::has_next, med::max<8> >
 >
 {
 	std::size_t get_tag() const             { return get<message_type>().get(); }
@@ -575,13 +564,8 @@ struct peer_address : med::octet_string<med::octets_var_intern<16>, med::min<4>>
 This information element contains a list of 'n' Extension Header Types. The length field is set to the number of
 extension header types included.
 */
-struct ext_hdr_type : med::value<8>
-{
-	static constexpr char const* name() { return "Extension Header Type"; }
-};
-
-struct ext_hdr_type_list : med::sequence<
-	M< ext_hdr_type, med::max<10> >
+struct eh_type_list : med::sequence<
+	M< ext::header_type, med::max<8> >
 >
 {
 	using tag = med::cvalue<141, 8>;
@@ -669,7 +653,7 @@ Implementers should avoid repeated attempts to use unknown extension headers wit
 inability to interpret them.
 */
 struct supported_eh : med::sequence<
-	M< ext_hdr_type_list::tag, ext_hdr_type_list::length, ext_hdr_type_list >
+	M< eh_type_list::tag, eh_type_list::length, eh_type_list >
 >
 {
 	static constexpr uint8_t id = 31;
@@ -748,12 +732,21 @@ struct proto : med::choice< header
 >
 {
 	using length_type = length;
+#ifdef CODEC_TRACE_ENABLE
+	static constexpr char const* name() { return "GTPU"; }
+#endif
 };
 
 
 //peek-preview w/o decoding (to speed-up processing of G-PDU)
 struct header_s
 {
+	enum : uint8_t {
+		OS = 0, //offset for SN
+		ON = 2, //offset for NP
+		OE = 3, //offset for E
+		LH = OE+1, //additional size for long header
+	};
 	uint8_t  flags;
 	uint8_t  message_type;
 	uint16_t m_length;
@@ -766,13 +759,16 @@ struct header_s
 	bool is_gtpu() const        { return flags & version_flags::PT; }
 	bool has_eh() const         { return flags & version_flags::E; }
 	bool has_sn() const         { return flags & version_flags::S; }
-	bool has_pn() const         { return flags & version_flags::NP; }
+	bool has_np() const         { return flags & version_flags::NP; }
 	bool is_long() const        { return flags & (version_flags::E|version_flags::S|version_flags::NP); }
 
 	uint16_t length() const     { return ntohs(m_length);}
 	uint32_t teid() const       { return ntohl(m_teid); }
+	uint16_t sn() const         { return has_sn() ? ((*beyond(OS) << 8) | *beyond(OS+1)) : 0; }
+	uint8_t npdu() const        { return has_np() ? *beyond(ON) : 0; }
+	uint8_t next_eh() const     { return has_eh() ? *beyond(OE) : 0; }
 
-	bool is_gpdu() const        { return is_gtpu() && g_pdu::id == message_type && !is_long(); }
+	bool is_gpdu() const        { return is_gtpu() && g_pdu::id == message_type; }
 
 	//make G-PDU returning the pointer to its payload
 	uint8_t* gpdu(uint32_t teid_, std::size_t payload_size)
@@ -781,11 +777,40 @@ struct header_s
 		message_type = g_pdu::id;
 		m_length = htons(payload_size);
 		m_teid = htonl(teid_);
-		return reinterpret_cast<uint8_t*>(this) + sizeof(*this);
+		return beyond(0);
+	}
+	uint8_t* gpdu(uint32_t teid_, uint16_t _sn, std::size_t payload_size)
+    {
+		flags = 0x30 | version_flags::S;
+		message_type = g_pdu::id;
+		m_length = htons(payload_size) + LH;
+		m_teid = htonl(teid_);
+		*beyond(OS) = uint8_t(_sn >> 8);
+		*beyond(OS+1) = uint8_t(_sn);
+		*beyond(ON) = 0;
+		*beyond(OE) = 0;
+		return beyond(LH);
+	}
+	uint8_t* gpdu(uint32_t teid_, uint16_t _sn, uint8_t _np, std::size_t payload_size)
+    {
+		flags = 0x30 | version_flags::S | version_flags::NP;
+		message_type = g_pdu::id;
+		m_length = htons(payload_size) + LH;
+		m_teid = htonl(teid_);
+		*beyond(OS) = uint8_t(_sn >> 8);
+		*beyond(OS+1) = uint8_t(_sn);
+		*beyond(ON) = _np;
+		*beyond(OE) = 0;
+		return beyond(LH);
 	}
 
 	//returns pointer to G-PDU payload or nullptr
-	void const* gpdu() const { return is_gpdu() ? reinterpret_cast<char const*>(this) + sizeof(*this) : nullptr; }
+	void const* gpdu() const    { return (is_gpdu() && 0 == next_eh()) ? beyond(is_long() ? LH:0) : nullptr; }
+
+private:
+	//access bytes beyond this
+	uint8_t* beyond(std::size_t n)              { return reinterpret_cast<uint8_t*>(this) + sizeof(*this) + n; }
+	uint8_t const* beyond(std::size_t n) const  { return const_cast<header_s*>(this)->beyond(n); }
 
 } __attribute__((packed));
 

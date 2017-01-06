@@ -34,8 +34,8 @@ TEST(decode, echo_request)
 	ctx.reset(encoded, sizeof(encoded));
 	if (!decode(med::make_octet_decoder(ctx), proto))
 	{
-		dummy_sink d{2};
-		med::print(d, proto);
+//		dummy_sink d{2};
+//		med::print(d, proto);
 		FAIL() << toString(ctx.error_ctx());
 	}
 
@@ -67,6 +67,7 @@ TEST(encode, echo_request)
 	pe->ref<gtpu::extension_value>().set(sizeof(ev), ev);
 
 	{
+		//static_assert(med::has_ie_type_v<gtpu::proto>,"");
 		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
 		uint8_t const encoded[] = {
 			0x32, //version,flags(S)
@@ -107,12 +108,7 @@ TEST(decode, echo_response)
 		45, //reset counter
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto))
-	{
-		dummy_sink d{2};
-		med::print(d, proto);
-		FAIL() << toString(ctx.error_ctx());
-	}
+	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
 
 	gtpu::echo_response const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -153,8 +149,6 @@ TEST(encode, echo_response)
 		EXPECT_TRUE(Matches(encoded, buffer));
 	}
 }
-
-
 
 
 TEST(decode, error_indication)
@@ -247,8 +241,8 @@ TEST(decode, supported_eh)
 
 	ASSERT_EQ(1, proto.header().version());
 
-	//ASSERT_EQ(3, pmsg->get<gtpu::ext_hdr_type_list>().count<gtpu::ext_hdr_type>());
-	check_seqof<gtpu::ext_hdr_type>(pmsg->get<gtpu::ext_hdr_type_list>(), {1,3,7});
+	//ASSERT_EQ(3, pmsg->get<gtpu::ext_hdr_type_list>().count<gtpu::ext::header_type>());
+	check_seqof<gtpu::ext::header_type>(pmsg->get<gtpu::eh_type_list>(), {1,3,7});
 }
 
 TEST(encode, supported_eh)
@@ -260,10 +254,10 @@ TEST(encode, supported_eh)
 	gtpu::supported_eh& msg = proto.select();
 	proto.header().set_teid(0);
 
-	auto& tl = msg.ref<gtpu::ext_hdr_type_list>();
-	tl.push_back<gtpu::ext_hdr_type>(ctx)->set(1);
-	tl.push_back<gtpu::ext_hdr_type>(ctx)->set(3);
-	tl.push_back<gtpu::ext_hdr_type>(ctx)->set(7);
+	auto& tl = msg.ref<gtpu::eh_type_list>();
+	tl.push_back<gtpu::ext::header_type>(ctx)->set(1);
+	tl.push_back<gtpu::ext::header_type>(ctx)->set(3);
+	tl.push_back<gtpu::ext::header_type>(ctx)->set(7);
 
 	{
 		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
@@ -401,6 +395,64 @@ TEST(encode, g_pdu)
 	}
 }
 
+
+TEST(decode, eh_chain)
+{
+	gtpu::proto proto;
+	med::decoder_context<> ctx;
+	std::size_t alloc_buf[1024];
+	ctx.get_allocator().reset(alloc_buf);
+
+	uint8_t const encoded[] = {
+		0x36, //version,flags(E+S)
+		0xFE, //message type
+		0,8, //length
+		0,0,0,0, //teid
+		0,1, //sn (+S-flag)
+		0, //npdu number
+		0x40, //next eh = UDP port
+		1, //4 octets
+		0x12,0x34, //port
+		0, // next eh = no_more
+	};
+	ctx.reset(encoded, sizeof(encoded));
+	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+
+	gtpu::end_marker const* pmsg = proto.cselect();
+	ASSERT_NE(nullptr, pmsg);
+	EXPECT_EQ(0, pmsg->count<gtpu::private_extension>());
+
+	ASSERT_EQ(1, proto.header().version());
+	ASSERT_TRUE(proto.header().is_gtpu());
+
+	gtpu::ext::header const* eh = proto.header().field();
+	ASSERT_NE(nullptr, eh);
+}
+
+#if 0
+TEST(encode, end_marker)
+{
+	gtpu::proto proto;
+	uint8_t buffer[1024];
+	med::encoder_context<> ctx{buffer};
+
+	proto.ref<gtpu::end_marker>();
+	proto.header().set_teid(0);
+
+	{
+		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		uint8_t const encoded[] = {
+			0x30, //version,flags(-)
+			0xFE, //message type
+			0,0, //length
+			0,0,0,0, //teid
+		};
+
+		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
+		EXPECT_TRUE(Matches(encoded, buffer));
+	}
+}
+#endif
 
 int main(int argc, char **argv)
 {
