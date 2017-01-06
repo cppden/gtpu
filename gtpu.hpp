@@ -359,6 +359,10 @@ struct next_header : header
 				: me.last()->template get<no_more>());
 		}
 	};
+
+#ifdef CODEC_TRACE_ENABLE
+	static constexpr char const* name() { return "Next Extension Header"; }
+#endif
 };
 
 } //end: namespace ext
