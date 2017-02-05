@@ -4,9 +4,9 @@ GTPv1-U protocol definition in med (https://github.com/cppden/med)
 3GPP TS 29.281 (http://www.3gpp.org/ftp/Specs/archive/29_series/29.281/29281-d20.zip)
 NOTE: The complete range of message types defined for GTPv1 is defined in 3GPP TS 29.060.
 
-@copyright Denis Priyomov 2016
+@copyright Denis Priyomov 2016-2017
 Distributed under the MIT License
-(See accompanying file LICENSE or copy at https://opensource.org/licenses/MIT)
+(See accompanying file LICENSE or visit https://github.com/cppden/med)
 */
 
 #pragma once
@@ -31,7 +31,7 @@ using M = med::mandatory<T...>;
 template <typename ...T>
 using O = med::optional<T...>;
 template <class T>
-using CASE = med::tag<med::cvalue<T::id>, T>;
+using CASE = med::tag<med::value<med::fixed<T::id>>, T>;
 
 /*
 5	GTP-U header
@@ -83,12 +83,12 @@ Optional fields:
 	the scenario. (For example, for GSM/GPRS to GSM/GPRS, the SNDCP N-PDU number is present in this field).
 - Next Extension Header Type: This field defines the type of Extension Header that follows this field in the GTP‑PDU.
 */
-struct sequence_number : med::value<16>
+struct sequence_number : med::value<uint16_t>
 {
 	static constexpr char const* name() { return "Sequence Number"; }
 };
 
-struct npdu_number : med::value<8>
+struct npdu_number : med::value<uint8_t>
 {
 	static constexpr char const* name() { return "N-PDU Number"; }
 };
@@ -96,7 +96,7 @@ struct npdu_number : med::value<8>
 namespace ext {
 
 //Figure 5.2.1-3: Definition of Extension Header Type
-struct header_type : med::value<8>
+struct header_type : med::value<uint8_t>
 {
 	static constexpr char const* name() { return "Extension Header Type"; }
 };
@@ -135,7 +135,7 @@ struct no_more : med::empty
 	static constexpr uint8_t id = 0b00000000;
 };
 
-struct length : med::value<8> //in 4 octets
+struct length : med::value<uint8_t> //in 4 octets
 {
 	static bool value_to_length(std::size_t& v)
 	{
@@ -163,7 +163,7 @@ Octet|
  2-3 | UDP Port number
    4 | Next Extension Header Type
 */
-struct udp_port_number : med::value<16>
+struct udp_port_number : med::value<uint16_t>
 {
 	static constexpr char const* name() { return "UDP Port Number"; }
 };
@@ -192,7 +192,7 @@ Octet|
  2-3 | PDCP PDU number
    4 | Next Extension Header Type
 */
-struct pdcp_pdu_number : med::value<16>
+struct pdcp_pdu_number : med::value<uint16_t>
 {
 	static constexpr char const* name() { return "PDCP PDU Number"; }
 };
@@ -226,7 +226,7 @@ Oct\Bit | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 |
  5-7    | Spare
  8      | Next Extension Header Type
 */
-struct long_pdcp_pdu_number : med::value<24>
+struct long_pdcp_pdu_number : med::value<med::bits<24>>
 {
 	value_type get() const              { return get_encoded() & 0x3FFFF; }
 	void set(value_type v)              { set_encoded(v & 0x3FFFF); }
@@ -283,7 +283,7 @@ Bits-7..1
 0000000..1111111 Spare for future use
 =======================================
 */
-struct sci_value : med::value<8>
+struct sci_value : med::value<uint8_t>
 {
 	static constexpr char const* name() { return "Service Class Indicator"; }
 	value_type get() const              { return get_encoded() & 0x7F; }
@@ -369,7 +369,7 @@ struct next_header : header
 
 
 
-struct version_flags : med::value<8>
+struct version_flags : med::value<uint8_t>
 {
 	enum : value_type
 	{
@@ -427,16 +427,16 @@ struct version_flags : med::value<8>
 	};
 };
 
-struct message_type : med::value<8>
+struct message_type : med::value<uint8_t>
 {
 	static constexpr char const* name() { return "Message Type"; }
 };
 
-struct length : med::value<16>
+struct length : med::value<uint16_t>
 {
 };
 
-struct teid : med::value<32>
+struct teid : med::value<uint32_t>
 {
 	static constexpr char const* name() { return "TEID"; }
 };
@@ -516,9 +516,9 @@ The most significant bit in the Type field is set to 0 when the TV format is use
 The value of the restart counter shall be set to 0 by the sending entity and ignored by the receiving entity.
 This information element is used in GTP user plane due to backwards compatibility reasons.
 */
-struct recovery : med::value<8>
+struct recovery : med::value<uint8_t>
 {
-	using tag = med::cvalue<14, 8>;
+	using tag = med::value<med::fixed<14, uint8_t>>;
 	static constexpr char const* name() { return "Restart Counter"; }
 };
 
@@ -526,9 +526,9 @@ struct recovery : med::value<8>
 8.3	Tunnel Endpoint Identifier Data I
 The TEID Data I information element contains the TEID used by a GTP entity for the user plane.
 */
-struct teid_data : med::value<32>
+struct teid_data : med::value<uint32_t>
 {
-	using tag = med::cvalue<16, 8>;
+	using tag = med::value<med::fixed<16, uint8_t>>;
 	static constexpr char const* name() { return "TEID Data I"; }
 };
 
@@ -542,8 +542,8 @@ The encoded address might belong not only to a GSN, but also to an RNC, eNodeB, 
 */
 struct peer_address : med::octet_string<med::octets_var_intern<16>, med::min<4>>
 {
-	using tag = med::cvalue<133, 8>;
-	using length = med::length_t<med::value<16>>;
+	using tag = med::value<med::fixed<133, uint8_t>>;
+	using length = med::length_t<med::value<uint16_t>>;
 
 	static constexpr char const* name()         { return "Peer Address"; }
 	template <std::size_t N>
@@ -572,8 +572,8 @@ struct eh_type_list : med::sequence<
 	M< ext::header_type, med::max<8> >
 >
 {
-	using tag = med::cvalue<141, 8>;
-	using length = med::length_t<med::value<8>>;
+	using tag = med::value<med::fixed<141, uint8_t>>;
+	using length = med::length_t<med::value<uint8_t>>;
 	static constexpr char const* name() { return "Extension Header Type List"; }
 };
 
@@ -584,7 +584,7 @@ defined in the Private Enterprise number list in the most recent "Assigned Numbe
 This is an optional information element that may be included in any GTP Signalling message. A signalling message may
 include more than one information element of the Private Extension type.
 */
-struct extension_id : med::value<16>
+struct extension_id : med::value<uint16_t>
 {
 	static constexpr char const* name() { return "Extension Identifier"; }
 };
@@ -599,8 +599,8 @@ struct private_extension : med::sequence<
 	M< extension_value >
 >
 {
-	using tag = med::cvalue<255, 8>;
-	using length = med::length_t<med::value<16>>;
+	using tag = med::value<med::fixed<255, uint8_t>>;
+	using length = med::length_t<med::value<uint16_t>>;
 	static constexpr char const* name() { return "Private Extension"; }
 };
 
