@@ -32,12 +32,7 @@ TEST(decode, echo_request)
 		1,2,3 //extension value
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto))
-	{
-//		dummy_sink d{2};
-//		med::print(d, proto);
-		FAIL() << toString(ctx.error_ctx());
-	}
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::echo_request const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -68,7 +63,7 @@ TEST(encode, echo_request)
 
 	{
 		//static_assert(med::has_ie_type_v<gtpu::proto>,"");
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x32, //version,flags(S)
 			1, //message type
@@ -108,7 +103,7 @@ TEST(decode, echo_response)
 		45, //reset counter
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::echo_response const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -132,7 +127,7 @@ TEST(encode, echo_response)
 	msg.ref<gtpu::recovery>().set(45);
 
 	{
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x32, //version,flags(S)
 			2, //message type
@@ -170,7 +165,7 @@ TEST(decode, error_indication)
 		192,168,1,3, //IPv4
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::error_indication const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -198,7 +193,7 @@ TEST(encode, error_indication)
 	msg.ref<gtpu::peer_address>().set(4, ip);
 
 	{
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x30, //version,flags(-)
 			26, //message type
@@ -234,7 +229,7 @@ TEST(decode, supported_eh)
 		1,3,7, //eh type(s)
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::supported_eh const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -260,7 +255,7 @@ TEST(encode, supported_eh)
 	tl.push_back<gtpu::ext::header_type>(ctx)->set(7);
 
 	{
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x30, //version,flags(.)
 			31, //message type
@@ -291,7 +286,7 @@ TEST(decode, end_marker)
 		0,0,0,0, //teid
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::end_marker const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -312,7 +307,7 @@ TEST(encode, end_marker)
 	proto.header().set_teid(0);
 
 	{
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x30, //version,flags(-)
 			0xFE, //message type
@@ -343,7 +338,7 @@ TEST(decode, g_pdu)
 
 	//now decode it with codec
 	ctx.reset(buf, sizeof(buf));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::g_pdu const* pmsg = proto.cselect();
 	ASSERT_NE(nullptr, pmsg);
@@ -373,7 +368,7 @@ TEST(encode, g_pdu)
 	msg.set(sizeof(pdu), pdu);
 
 	{
-		if (!encode(med::make_octet_encoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+		encode(med::make_octet_encoder(ctx), proto);
 		uint8_t const encoded[] = {
 			0x30, //version,flags(-)
 			0xFF, //message type
@@ -430,7 +425,7 @@ TEST(decode, eh_chain)
 		0, // next eh = no_more
 	};
 	ctx.reset(encoded, sizeof(encoded));
-	if (!decode(med::make_octet_decoder(ctx), proto)) { FAIL() << toString(ctx.error_ctx()); }
+	decode(med::make_octet_decoder(ctx), proto);
 
 	gtpu::end_marker const* pmsg = proto.select();
 	ASSERT_NE(nullptr, pmsg);
@@ -542,7 +537,7 @@ TEST(encode, eh_chain)
 	ASSERT_NE(nullptr, p);
 	p->ref<gtpu::ext::no_more>();
 
-	if (encode(med::make_octet_encoder(ctx), proto))
+	encode(med::make_octet_encoder(ctx), proto);
 	{
 		uint8_t const encoded[] = {
 			0x36, //version,flags(E+S)
@@ -573,10 +568,6 @@ TEST(encode, eh_chain)
 
 		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
 		EXPECT_TRUE(Matches(encoded, ctx.buffer().get_start()));
-	}
-	else
-	{
-		FAIL() << toString(ctx.error_ctx());
 	}
 }
 
