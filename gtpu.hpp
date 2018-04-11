@@ -302,9 +302,9 @@ struct sci : med::sequence<
 
 /*
 5.2.2.4	RAN Container
-This extension header may be transmitted in a G-PDU over the X2 user plane interface between the eNBs. The RAN
-Container has a variable length and its content is specified in 3GPP TS 36.425 [25]. A G-PDU message with this
-extension header may be sent without a T-PDU.
+This extension header may be transmitted in a G-PDU over the X2 user plane interface between the eNBs.
+The RAN Container has a variable length and its content is specified in 3GPP TS 36.425 [25].
+A G-PDU message with this extension header may be sent without a T-PDU.
 
  Octets |
     1   | 0xN
@@ -337,10 +337,52 @@ struct header : med::choice< header_type
 >
 {
 	using length_type = ext::length;
-	using padding = med::padding<4*8>; //pad to 4 octets
+	using padding = med::padding<uint32_t, true>; //pad to 4 octets inclusive
 #ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Extension Header"; }
 #endif
+
+	struct setter
+	{
+		template <class IEs>
+		void operator()(npdu_number& out, IEs const& ies) const
+		{
+			if (!ies.template as<npdu_number>().is_set())
+			{
+				if (ies.template as<ext::header>().is_set()
+				|| ies.template as<sequence_number>().is_set())
+				{
+					out.set(0);
+				}
+			}
+		}
+
+		template <class IEs>
+		void operator()(sequence_number& out, IEs const& ies) const
+		{
+			if (!ies.template as<sequence_number>().is_set())
+			{
+				if (ies.template as<ext::header>().is_set()
+				|| ies.template as<npdu_number>().is_set())
+				{
+					out.set(0);
+				}
+			}
+		}
+
+		template <class IEs>
+		void operator()(header& out, IEs const& ies) const
+		{
+			if (!ies.template as<header>().is_set())
+			{
+				if (ies.template as<sequence_number>().is_set()
+				|| ies.template as<npdu_number>().is_set())
+				{
+					out.template ref<no_more>();
+				}
+			}
+		}
+	};
 };
 
 struct next_header : header
@@ -402,8 +444,8 @@ struct version_flags : med::value<uint8_t>
 
 	struct setter
 	{
-		template <class T>
-		void operator()(T& ies) const
+		template <class IEs>
+		void operator()(version_flags& out, IEs const& ies) const
 		{
 			auto& eh = ies.template as<ext::header>();
 			auto& sn = ies.template as<sequence_number>();
@@ -415,15 +457,15 @@ struct version_flags : med::value<uint8_t>
 				(sn.is_set() ? S:0) |
 				(np.is_set() ? NP:0);
 
-			if (vf & (E|S|NP)) //clear fields not set
-			{
-				if (!eh.is_set()) eh.template ref<ext::no_more>();
-				if (!sn.is_set()) sn.set(0);
-				if (!np.is_set()) np.set(0);
-			}
-
-			ies.template as<version_flags>().set_encoded(vf);
+//			if (vf & (E|S|NP)) //clear fields not set
+//			{
+//				if (!eh.is_set()) eh.template ref<ext::no_more>();
+//				if (!sn.is_set()) sn.set(0);
+//				if (!np.is_set()) np.set(0);
+//			}
+			out.set_encoded(vf);
 		}
+
 	};
 };
 
@@ -467,9 +509,9 @@ struct header : med::sequence<
 	M< message_type >,
 	med::placeholder::_length<8>,
 	M< teid >,
-	O< sequence_number, version_flags::has_ext_fields >,
-	O< npdu_number, version_flags::has_ext_fields >,
-	O< ext::header, version_flags::has_ext_fields >,
+	O< sequence_number, ext::header::setter, version_flags::has_ext_fields >,
+	O< npdu_number, ext::header::setter, version_flags::has_ext_fields >,
+	O< ext::header, ext::header::setter, version_flags::has_ext_fields >,
 	O< ext::next_header, ext::next_header::has_next, med::max<8> >
 >
 {
