@@ -24,24 +24,18 @@ matrix:
     - compiler: gcc
       addons:
         apt:
-          sources:
-            - ubuntu-toolchain-r-test
-          packages:
-            - g++-6
+          sources: ['ubuntu-toolchain-r-test']
+          packages: ['g++-7']
       env:
-        - COMPILER=g++-6
+        - COMPILER=g++-7
 
     - compiler: clang
       addons:
         apt:
-          sources:
-            - ubuntu-toolchain-r-test
-            - llvm-toolchain-precise-3.8
-          packages:
-            - g++-6
-            - clang-3.8
+          sources: ['ubuntu-toolchain-r-test', 'llvm-toolchain-trusty-5.0']
+          packages: ['g++-7', 'clang-5.0']
       env:
-        - COMPILER=clang++-3.8
+        - COMPILER=clang++-5.0
 
 notifications:
   email: false
