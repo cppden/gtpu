@@ -36,3 +36,4 @@ build/
 *.mk
 *.project
 *.txt
+*.user
