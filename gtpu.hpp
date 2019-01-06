@@ -31,7 +31,7 @@ using M = med::mandatory<T...>;
 template <typename ...T>
 using O = med::optional<T...>;
 template <class T>
-using CASE = med::tag<med::value<med::fixed<T::id>>, T>;
+using CASE = med::tag<med::value<med::fixed<T::id, uint8_t>>, T>;
 
 /*
 5	GTP-U header
