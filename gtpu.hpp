@@ -130,7 +130,7 @@ constexpr bool required(uint8_t eh_type)    { return 0 != (eh_type & 0b10000000)
 //false: shall discard the Extension Header Content and not forward it to any Receiver Endpoint.
 constexpr bool forward(uint8_t eh_type)     { return 0 == (eh_type & 0b01000000); }
 
-struct no_more : med::empty
+struct no_more : med::empty<>
 {
 	static constexpr uint8_t id = 0b00000000;
 };
