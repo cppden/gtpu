@@ -1,17 +1,15 @@
+#pragma once
 /**
 @file
 GTPv1-U protocol definition in med (https://github.com/cppden/med)
-3GPP TS 29.281 (http://www.3gpp.org/ftp/Specs/archive/29_series/29.281/29281-d20.zip)
+3GPP TS 29.281 V17.1.0 (2021-09)
 NOTE: The complete range of message types defined for GTPv1 is defined in 3GPP TS 29.060.
 
-@copyright Denis Priyomov 2016-2017
+@copyright Denis Priyomov 2016-2022
 Distributed under the MIT License
 (See accompanying file LICENSE or visit https://github.com/cppden/med)
 */
 
-#pragma once
-
-#include <cstdint>
 #include <arpa/inet.h>
 
 #include "med/value.hpp"
@@ -31,7 +29,7 @@ using M = med::mandatory<T...>;
 template <typename ...T>
 using O = med::optional<T...>;
 template <class T>
-using CASE = med::tag<med::value<med::fixed<T::id, uint8_t>>, T>;
+using CASE = M<med::value<med::fixed<T::id, uint8_t>>, T>;
 
 /*
 5	GTP-U header
@@ -98,7 +96,9 @@ namespace ext {
 //Figure 5.2.1-3: Definition of Extension Header Type
 struct header_type : med::value<uint8_t>
 {
+#ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Extension Header Type"; }
+#endif
 };
 
 /*
@@ -130,23 +130,26 @@ constexpr bool required(uint8_t eh_type)    { return 0 != (eh_type & 0b10000000)
 //false: shall discard the Extension Header Content and not forward it to any Receiver Endpoint.
 constexpr bool forward(uint8_t eh_type)     { return 0 == (eh_type & 0b01000000); }
 
+struct any_tag : med::value<uint8_t>
+{
+	static constexpr bool match(value_type) { return true; }
+};
+
 struct no_more : med::empty<>
 {
 	static constexpr uint8_t id = 0b00000000;
 };
 
-struct length : med::value<uint8_t> //in 4 octets
+struct length : med::value<uint8_t, med::padding<uint32_t>> //in 4 octets
 {
-	static bool value_to_length(std::size_t& v)
+	static void value_to_length(std::size_t& v)
 	{
-		v <<= 2;
-		return true;
+		v *= 4;
 	}
 
-	static bool length_to_value(std::size_t& v)
+	static void length_to_value(std::size_t& v)
 	{
-		v >>= 2;
-		return true;
+		v = (v+3) / 4;
 	}
 
 #ifdef CODEC_TRACE_ENABLE
@@ -327,17 +330,69 @@ struct ran_container : med::sequence<
 	uint8_t const* data() const                 { return this->get<container_data>().data(); }
 };
 
-struct header : med::choice< header_type
-	, CASE< no_more >
-	, CASE< udp_port >
-	, CASE< pdcp_pdu >
-	, CASE< long_pdcp_pdu >
-	, CASE< sci >
-	, CASE< ran_container >
+struct xw_ran_container : med::sequence<
+	med::placeholder::_length<>,
+	M< container_data >
+>
+{
+	static constexpr uint8_t id = 0b1000'0011;
+	using container_t::get;
+	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
+	std::size_t size() const                    { return this->get<container_data>().size(); }
+	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+};
+
+struct nr_ran_container : med::sequence<
+	med::placeholder::_length<>,
+	M< container_data >
+>
+{
+	static constexpr uint8_t id = 0b1000'0100;
+	using container_t::get;
+	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
+	std::size_t size() const                    { return this->get<container_data>().size(); }
+	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+};
+
+struct pdu_session_container : med::sequence<
+	med::placeholder::_length<>,
+	M< container_data >
+>
+{
+	static constexpr uint8_t id = 0b1000'0101;
+	using container_t::get;
+	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
+	std::size_t size() const                    { return this->get<container_data>().size(); }
+	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+};
+
+struct unknown : med::sequence<
+	med::placeholder::_length<>,
+	M< container_data >
+>
+{
+	static constexpr uint8_t id = 0b1000'0101;
+	using container_t::get;
+	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
+	std::size_t size() const                    { return this->get<container_data>().size(); }
+	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+};
+
+struct header : med::choice<
+	CASE< no_more >,
+	CASE< udp_port >,
+	CASE< pdcp_pdu >,
+	CASE< long_pdcp_pdu >,
+	CASE< sci >,
+	CASE< ran_container >,
+	CASE< xw_ran_container >,
+	CASE< nr_ran_container >,
+	CASE< pdu_session_container >,
+	M< any_tag, unknown >
 >
 {
 	using length_type = ext::length;
-	using padding = med::padding<uint32_t, true>; //pad to 4 octets inclusive
+	//using padding = med::padding<uint32_t, true>; //pad to 4 octets inclusive
 #ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Extension Header"; }
 #endif
@@ -390,15 +445,28 @@ struct next_header : header
 	struct has_next
 	{
 		template <class IES>
-		bool operator()(IES const& ies) const
+		constexpr bool operator()(IES const& ies) const
 		{
-			auto& me = ies.template as<next_header>();
-			CODEC_TRACE("%sheader", me.empty() ? "":"next_");
 			//if no chain then check ext::header otherwise look into the last ext::next_header
 			//if previous next_eh_type wasn't no_more then we need one more next_eh_type
-			return nullptr == (me.empty()
-				? ies.template as<header>().ref_field().template get<no_more>()
+			auto& me = ies.template as<next_header>();
+#ifdef CODEC_TRACE_ENABLE
+			if (me.empty())
+			{
+				auto* ptr = ies.template as<header>().template get<no_more>();
+				CODEC_TRACE("no-more = %p", (void*)ptr);
+			}
+			else
+			{
+				auto* ptr = me.last()->template get<no_more>();
+				CODEC_TRACE("no-more = %p", (void*)ptr);
+			}
+#endif
+			bool const res = nullptr == (me.empty()
+				? ies.template as<header>().template get<no_more>()
 				: me.last()->template get<no_more>());
+			CODEC_TRACE("ext::%sheader -> %d", me.empty() ? "":"next_", res);
+			return res;
 		}
 	};
 
@@ -409,7 +477,35 @@ struct next_header : header
 
 } //end: namespace ext
 
+/*
+Oct\Bit | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 |
+--------+---+---+---+---+---+---+---+---+
+    1   | Version   |PT | 0 | E | S |PN |
+    2   | Message Type                  |
+    3   | Length (1st Octet)            |
+    4   | Length (2nd Octet)            |
+    5   | TEID (1st Octet)              |
+    6   | TEID (2nd Octet)              |
+    7   | TEID (3rd Octet)              |
+    8   | TEID (4th Octet)              |
+    9   | SN (1st Octet) [NOTE 1,4]     |
+   10   | SN (2nd Octet) [NOTE 1,4]     |
+   11   | N-PDU Number [NOTE 2,4]       |
+   12   | Next Ext Hdr Type [NOTE 3,4]  |
 
+NOTE 1: This field shall only be evaluated when indicated by the S flag set to 1.
+NOTE 2: This field shall only be evaluated when indicated by the PN flag set to 1.
+NOTE 3: This field shall only be evaluated when indicated by the E flag set to 1.
+NOTE 4: This field shall be present if and only if any one or more of the S, PN and E flags are set.
+*/
+struct opt_header : med::sequence<
+	M< sequence_number, ext::header::setter >,
+	M< npdu_number, ext::header::setter >,
+	M< ext::header, ext::header::setter >,
+	O< ext::next_header, ext::next_header::has_next, med::max<8> >
+>
+{
+};
 
 struct version_flags : med::value<uint8_t>
 {
@@ -447,22 +543,16 @@ struct version_flags : med::value<uint8_t>
 		template <class IEs>
 		void operator()(version_flags& out, IEs const& ies) const
 		{
-			auto& eh = ies.template as<ext::header>();
-			auto& sn = ies.template as<sequence_number>();
-			auto& np = ies.template as<npdu_number>();
+			auto& opt = ies.template as<opt_header>();
+			auto& eh = opt.template get<ext::header>();
+			auto& sn = opt.template get<sequence_number>();
+			auto& np = opt.template get<npdu_number>();
 			auto const vf =
 				(1 << 5) | //version = 1
 				PT | //protocol type = 1 (GTPU)
 				(eh.is_set() ? E:0) |
 				(sn.is_set() ? S:0) |
 				(np.is_set() ? NP:0);
-
-//			if (vf & (E|S|NP)) //clear fields not set
-//			{
-//				if (!eh.is_set()) eh.template ref<ext::no_more>();
-//				if (!sn.is_set()) sn.set(0);
-//				if (!np.is_set()) np.set(0);
-//			}
 			out.set_encoded(vf);
 		}
 
@@ -471,11 +561,9 @@ struct version_flags : med::value<uint8_t>
 
 struct message_type : med::value<uint8_t>
 {
+#ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Message Type"; }
-};
-
-struct length : med::value<uint16_t>
-{
+#endif
 };
 
 struct teid : med::value<uint32_t>
@@ -483,36 +571,12 @@ struct teid : med::value<uint32_t>
 	static constexpr char const* name() { return "TEID"; }
 };
 
-/*
-Oct\Bit | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 |
---------+---+---+---+---+---+---+---+---+
-    1   | Version   |PT | 0 | E | S |PN |
-    2   | Message Type                  |
-    3   | Length (1st Octet)            |
-    4   | Length (2nd Octet)            |
-    5   | TEID (1st Octet)              |
-    6   | TEID (2nd Octet)              |
-    7   | TEID (3rd Octet)              |
-    8   | TEID (4th Octet)              |
-    9   | SN (1st Octet) [NOTE 1,4]     |
-   10   | SN (2nd Octet) [NOTE 1,4]     |
-   11   | N-PDU Number [NOTE 2,4]       |
-   12   | Next Ext Hdr Type [NOTE 3,4]  |
-
-NOTE 1: This field shall only be evaluated when indicated by the S flag set to 1.
-NOTE 2: This field shall only be evaluated when indicated by the PN flag set to 1.
-NOTE 3: This field shall only be evaluated when indicated by the E flag set to 1.
-NOTE 4: This field shall be present if and only if any one or more of the S, PN and E flags are set.
-*/
 struct header : med::sequence<
 	M< version_flags, version_flags::setter >,
 	M< message_type >,
 	med::placeholder::_length<8>,
 	M< teid >,
-	O< sequence_number, ext::header::setter, version_flags::has_ext_fields >,
-	O< npdu_number, ext::header::setter, version_flags::has_ext_fields >,
-	O< ext::header, ext::header::setter, version_flags::has_ext_fields >,
-	O< ext::next_header, ext::next_header::has_next, med::max<8> >
+	O< opt_header, version_flags::has_ext_fields >
 >
 {
 	std::size_t get_tag() const             { return get<message_type>().get(); }
@@ -524,11 +588,11 @@ struct header : med::sequence<
 	teid::value_type get_teid() const       { return get<teid>().get(); }
 	void set_teid(teid::value_type v)       { ref<teid>().set(v); }
 
-	sequence_number::value_type sn() const  { return (vf() & version_flags::S) ? get<sequence_number>()->get() : 0; }
-	void sn(sequence_number::value_type v)  { ref<sequence_number>().set(v); }
+	sequence_number::value_type sn() const  { return (vf() & version_flags::S) ? get<opt_header>()->get<sequence_number>().get() : 0; }
+	void sn(sequence_number::value_type v)  { ref<opt_header>().ref<sequence_number>().set(v); }
 
-	npdu_number::value_type npdu() const    { return (vf() & version_flags::NP) ? get<npdu_number>()->get() : 0; }
-	void npdu(npdu_number::value_type v)    { ref<sequence_number>().set(v); }
+	npdu_number::value_type npdu() const    { return (vf() & version_flags::NP) ? get<opt_header>()->get<npdu_number>().get() : 0; }
+	void npdu(npdu_number::value_type v)    { ref<opt_header>().ref<npdu_number>().set(v); }
 
 	static constexpr char const* name()     { return "Header"; }
 
@@ -777,7 +841,7 @@ struct proto : med::choice< header
 	, CASE< g_pdu >
 >
 {
-	using length_type = length;
+	using length_type = med::value<uint16_t>;
 #ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "GTPU"; }
 #endif
@@ -818,7 +882,7 @@ struct header_s
 
 	//make G-PDU returning the pointer to its payload
 	uint8_t* gpdu(uint32_t teid_, std::size_t payload_size)
-    {
+	{
 		flags = 0x30;
 		message_type = g_pdu::id;
 		m_length = htons(payload_size);
@@ -826,7 +890,7 @@ struct header_s
 		return beyond(0);
 	}
 	uint8_t* gpdu(uint32_t teid_, uint16_t _sn, std::size_t payload_size)
-    {
+	{
 		flags = 0x30 | version_flags::S;
 		message_type = g_pdu::id;
 		m_length = htons(payload_size) + LH;
@@ -838,7 +902,7 @@ struct header_s
 		return beyond(LH);
 	}
 	uint8_t* gpdu(uint32_t teid_, uint16_t _sn, uint8_t _np, std::size_t payload_size)
-    {
+	{
 		flags = 0x30 | version_flags::S | version_flags::NP;
 		message_type = g_pdu::id;
 		m_length = htons(payload_size) + LH;

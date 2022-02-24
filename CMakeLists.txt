@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0)
 project(gtpu)
 
 enable_language(CXX)
@@ -28,6 +28,7 @@ set(CMAKE_LDFLAGS
 
 # Define the CXX sources
 set ( CXX_SRCS
+	gtpu.hpp
 	ut/gtpu.cpp
 )
 
