@@ -11,319 +11,25 @@
 
 #include "ut/ut.hpp"
 
-TEST(decode, echo_request)
+struct msg_data_s
 {
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
+	char const* name;
+	std::initializer_list<uint8_t> msg;
 
-	uint8_t const encoded[] = {
-		0x32, //version,flags(S)
-		1, //message type
-		0,12, //length
-		0,0,0,0, //teid
-		0,1, //sn (+S-flag)
-		0, //npdu number
-		0, //next eh type
-		0xFF, //tag=private extension
-		0,5, //length
-		0,45, //extension id
-		1,2,3 //extension value
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::echo_request const* pmsg = proto.cselect();
-	ASSERT_NE(nullptr, pmsg);
-
-	ASSERT_EQ(1, proto.header().version());
-	ASSERT_EQ(1, pmsg->count<gtpu::private_extension>());
-	for (auto const& pe : pmsg->get<gtpu::private_extension>())
+	friend std::ostream& operator << (std::ostream& o, msg_data_s const& d)
 	{
-		EXPECT_EQ(pe.get<gtpu::extension_id>().get(), 45);
+		return o << d.name << " size=" << d.msg.size();
 	}
-}
+};
 
-TEST(encode, echo_request)
+struct Gtpu : testing::TestWithParam<msg_data_s>
 {
-	gtpu::proto proto;
-	uint8_t buffer[1024];
-	med::encoder_context<> ctx{buffer};
+};
 
-	gtpu::echo_request& msg = proto.select();
-	proto.header().sn(1);
-	proto.header().set_teid(0);
-
-	gtpu::private_extension* pe = msg.ref<gtpu::private_extension>().push_back();
-	ASSERT_NE(nullptr, pe);
-	pe->ref<gtpu::extension_id>().set(45);
-	uint8_t const ev[] = {0x01,0x02,0x03};
-	pe->ref<gtpu::extension_value>().set(ev);
-
-	{
-		//static_assert(med::has_ie_type_v<gtpu::proto>,"");
-		encode(med::octet_encoder{ctx}, proto);
-		uint8_t const encoded[] = {
-			0x32, //version,flags(S)
-			1, //message type
-			0,12, //length
-			0,0,0,0, //teid
-			0,1, //sn (+S-flag)
-			0, //npdu number
-			0, //next eh type
-			0xFF, //tag=private extension
-			0,5, //length
-			0,45, //extension id
-			1,2,3 //extension value
-		};
-
-		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
-		EXPECT_TRUE(Matches(encoded, buffer));
-	}
-}
-
-
-TEST(decode, echo_response)
-{
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
-	uint8_t const encoded[] = {
-		0x32, //version,flags(S)
-		2, //message type
-		0,6, //length
-		0,0,0,0, //teid
-		0,1, //sn (+S-flag)
-		0, //npdu number
-		0, //next eh type
-		14, //tag=recovery
-		45, //reset counter
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::echo_response const* pmsg = proto.cselect();
-	ASSERT_NE(nullptr, pmsg);
-
-	ASSERT_EQ(1, proto.header().version());
-
-	gtpu::recovery const& rec = pmsg->field();
-	EXPECT_EQ(rec.get(), 45);
-}
-
-TEST(encode, echo_response)
-{
-	gtpu::proto proto;
-	uint8_t buffer[1024];
-	med::encoder_context<> ctx{buffer};
-
-	gtpu::echo_response& msg = proto.select();
-	proto.header().sn(1);
-	proto.header().set_teid(0);
-
-	msg.ref<gtpu::recovery>().set(45);
-
-	{
-		encode(med::octet_encoder{ctx}, proto);
-		uint8_t const encoded[] = {
-			0x32, //version,flags(S)
-			2, //message type
-			0,6, //length
-			0,0,0,0, //teid
-			0,1, //sn (+S-flag)
-			0, //npdu number
-			0, //next eh type
-			14, //tag=recovery
-			45, //reset counter
-		};
-
-		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
-		EXPECT_TRUE(Matches(encoded, buffer));
-	}
-}
-
-
-TEST(decode, error_indication)
-{
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
-	uint8_t const encoded[] = {
-		0x30, //version,flags(-)
-		26, //message type
-		0,12, //length
-		0,0,0,0, //teid
-		16, //tag=teid data
-		1,2,3,4,
-		133, //tag=peer address
-		0,4, //len
-		192,168,1,3, //IPv4
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::error_indication const* pmsg = proto.cselect();
-	ASSERT_NE(nullptr, pmsg);
-
-	ASSERT_EQ(1, proto.header().version());
-	ASSERT_TRUE(proto.header().is_gtpu());
-
-	EXPECT_EQ(0x01020304, pmsg->get<gtpu::teid_data>().get());
-
-	gtpu::peer_address const& rf = pmsg->field();
-	ASSERT_EQ(rf.size(), 4);
-}
-
-TEST(encode, error_indication)
-{
-	gtpu::proto proto;
-	uint8_t buffer[1024];
-	med::encoder_context<> ctx{buffer};
-
-	gtpu::error_indication& msg = proto.select();
-	proto.header().set_teid(0);
-
-	msg.ref<gtpu::teid_data>().set(0x01020304);
-	uint8_t const ip[] = {192,168,1,3};
-	msg.ref<gtpu::peer_address>().set(4, ip);
-
-	{
-		encode(med::octet_encoder{ctx}, proto);
-		uint8_t const encoded[] = {
-			0x30, //version,flags(-)
-			26, //message type
-			0,12, //length
-			0,0,0,0, //teid
-			16, //tag=teid data
-			1,2,3,4,
-			133, //tag=peer address
-			0,4, //len
-			192,168,1,3, //IPv4
-		};
-
-		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
-		EXPECT_TRUE(Matches(encoded, buffer));
-	}
-}
-
-
-TEST(decode, supported_eh)
-{
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
-	uint8_t const encoded[] = {
-		0x30, //version,flags(.)
-		31, //message type
-		0,5, //length
-		0,0,0,0, //teid
-		141, //tag=list
-		3, //len
-		1,3,7, //eh type(s)
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::supported_eh const* pmsg = proto.cselect();
-	ASSERT_NE(nullptr, pmsg);
-
-	ASSERT_EQ(1, proto.header().version());
-
-	//ASSERT_EQ(3, pmsg->get<gtpu::ext_hdr_type_list>().count<gtpu::ext::header_type>());
-	check_seqof<gtpu::ext::header_type>(pmsg->get<gtpu::eh_type_list>(), {1,3,7});
-}
-
-TEST(encode, supported_eh)
-{
-	std::size_t alloc_buf[256];
-	med::allocator alloc{alloc_buf};
-
-	gtpu::proto proto;
-	gtpu::supported_eh& msg = proto.select();
-	proto.header().set_teid(0);
-
-	auto& eh = msg.ref<gtpu::eh_type_list>().ref<gtpu::ext::header_type>();
-	eh.push_back(alloc)->set(1);
-	eh.push_back(alloc)->set(3);
-	eh.push_back(alloc)->set(7);
-
-	{
-		uint8_t buffer[1024];
-		med::encoder_context<> ctx{buffer};
-		encode(med::octet_encoder{ctx}, proto);
-		uint8_t const encoded[] = {
-			0x30, //version,flags(.)
-			31, //message type
-			0,5, //length
-			0,0,0,0, //teid
-			141, //tag=list
-			3, //len
-			1,3,7, //eh type(s)
-		};
-
-		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
-		EXPECT_TRUE(Matches(encoded, buffer));
-	}
-}
-
-
-TEST(decode, end_marker)
-{
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
-	uint8_t const encoded[] = {
-		0x30, //version,flags(-)
-		0xFE, //message type
-		0,0, //length
-		0,0,0,0, //teid
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::end_marker const* pmsg = proto.cselect();
-	ASSERT_NE(nullptr, pmsg);
-
-	ASSERT_EQ(1, proto.header().version());
-	ASSERT_TRUE(proto.header().is_gtpu());
-
-	ASSERT_EQ(0, pmsg->count<gtpu::private_extension>());
-}
-
-TEST(encode, end_marker)
-{
-	gtpu::proto proto;
-	uint8_t buffer[1024];
-	med::encoder_context<> ctx{buffer};
-
-	proto.ref<gtpu::end_marker>();
-	proto.header().set_teid(0);
-
-	{
-		encode(med::octet_encoder{ctx}, proto);
-		uint8_t const encoded[] = {
-			0x30, //version,flags(-)
-			0xFE, //message type
-			0,0, //length
-			0,0,0,0, //teid
-		};
-
-		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
-		EXPECT_TRUE(Matches(encoded, buffer));
-	}
-}
 
 
 TEST(decode, g_pdu)
 {
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
 	//sample G-PDU payload
 	uint8_t const payload[] = {1,4,56,7,89,32,77,83,90,91};
 
@@ -333,6 +39,8 @@ TEST(decode, g_pdu)
 	std::memcpy(ph->gpdu(1234, sizeof(payload)), payload, sizeof(payload));
 
 	//now decode it with codec
+	std::size_t alloc_buf[1024];
+	med::allocator alloc{alloc_buf};
 	med::decoder_context<med::allocator> ctx{buf, &alloc};
 	gtpu::proto proto;
 	decode(med::octet_decoder{ctx}, proto);
@@ -344,7 +52,6 @@ TEST(decode, g_pdu)
 	EXPECT_TRUE(proto.header().is_gtpu());
 	EXPECT_EQ(0, proto.header().sn());
 	EXPECT_EQ(0, proto.header().npdu());
-	//EXPECT_TRUE(proto.header().is_short());
 	EXPECT_EQ(1234, proto.header().get_teid());
 
 	ASSERT_EQ(sizeof(payload), pmsg->size());
@@ -371,7 +78,7 @@ TEST(encode, g_pdu)
 			0xFF, //message type
 			0,5, //length
 			4,3,2,1, //teid
-			1,2,3,4,5
+			1,2,3,4,5 //G-PDU
 		};
 
 		EXPECT_EQ(sizeof(encoded), ctx.buffer().get_offset());
@@ -381,123 +88,14 @@ TEST(encode, g_pdu)
 		auto ph = gtpu::header_s::from(encoded);
 		EXPECT_EQ(teid, ph->teid());
 		auto payload = ph->gpdu();
-		ASSERT_NE(nullptr, payload);
+		ASSERT_FALSE(payload.empty());
 		EXPECT_EQ(sizeof(pdu), ph->length());
-		EXPECT_TRUE(Matches(pdu, payload, sizeof(pdu)));
+		EXPECT_TRUE(Matches(pdu, payload.ro, sizeof(pdu)));
 	}
 }
 
-
-TEST(decode, eh_chain)
-{
-	std::size_t alloc_buf[1024];
-	med::allocator alloc{alloc_buf};
-
-	uint8_t const encoded[] = {
-		0x36, //version,flags(E+S)
-		0xFE, //message type
-		0,36, //length
-		0,0,0,0, //teid
-		0,1, //sn (+S-flag)
-		0, //npdu number
-		0x40, //next eh = UDP port
-		1, //4 octets
-		0x12,0x34, //port
-		0xC0, //next eh = PDCP PDU
-		1, //4 octets
-		0x87, 0x65,
-		0x82, //next eh = long PDCP PDU
-		2, //8 octets
-		0x03, 0x87, 0x65,
-		0,0,0, //spare
-		0x20, //next eh = SCI
-		1, //4 octets
-		0x37,
-		0, //spare
-		0x81, //next eh = RAN container
-		3, //12 octets
-		1,2,3,4,5,6,7,8,9,10,
-		0, // next eh = no_more
-	};
-	med::decoder_context<med::allocator> ctx{encoded, &alloc};
-	gtpu::proto proto;
-	decode(med::octet_decoder{ctx}, proto);
-
-	gtpu::end_marker const* pmsg = proto.select();
-	ASSERT_NE(nullptr, pmsg);
-	EXPECT_EQ(0, pmsg->count<gtpu::private_extension>());
-
-	ASSERT_EQ(1, proto.header().version());
-	ASSERT_TRUE(proto.header().is_gtpu());
-
-	gtpu::opt_header const* opt = proto.header().field();
-	ASSERT_NE(nullptr, opt);
-
-	{
-		constexpr auto id = gtpu::ext::header::index<gtpu::ext::udp_port>();
-		gtpu::ext::header const& eh = opt->field();
-		EXPECT_EQ(id, eh.index());
-		gtpu::ext::udp_port const* p = eh.select();
-		ASSERT_NE(nullptr, p);
-		EXPECT_EQ(0x1234, p->get());
-	}
-
-	auto& ehs = opt->get<gtpu::ext::next_header>();
-	auto it = ehs.begin();
-
-	//+1 since the last will be no_more
-	EXPECT_EQ(5, ehs.count());
-
-	{
-		constexpr auto id = gtpu::ext::next_header::index<gtpu::ext::pdcp_pdu>();
-		ASSERT_NE(ehs.end(), it);
-		EXPECT_EQ(id, it->index());
-		gtpu::ext::pdcp_pdu const* p = it->select();
-		ASSERT_NE(nullptr, p);
-		EXPECT_EQ(0x8765, p->get());
-		++it;
-	}
-	{
-		constexpr auto id = gtpu::ext::next_header::index<gtpu::ext::long_pdcp_pdu>();
-		ASSERT_NE(ehs.end(), it);
-		EXPECT_EQ(id, it->index());
-		gtpu::ext::long_pdcp_pdu const* p = it->select();
-		ASSERT_NE(nullptr, p);
-		EXPECT_EQ(0x38765, p->get());
-		++it;
-	}
-	{
-		constexpr auto id = gtpu::ext::next_header::index<gtpu::ext::sci>();
-		ASSERT_NE(ehs.end(), it);
-		EXPECT_EQ(id, it->index());
-		gtpu::ext::sci const* p = it->select();
-		ASSERT_NE(nullptr, p);
-		EXPECT_EQ(0x37, p->get());
-		++it;
-	}
-	{
-		constexpr auto id = gtpu::ext::next_header::index<gtpu::ext::ran_container>();
-		ASSERT_NE(ehs.end(), it);
-		EXPECT_EQ(id, it->index());
-		gtpu::ext::ran_container const* p = it->select();
-		ASSERT_NE(nullptr, p);
-		uint8_t const data[] = {1,2,3,4,5,6,7,8,9,10};
-		ASSERT_EQ(10, p->size());
-		EXPECT_TRUE(Matches(data, p->data()));
-		++it;
-	}
-	{
-		constexpr auto id = gtpu::ext::next_header::index<gtpu::ext::no_more>();
-		ASSERT_NE(ehs.end(), it);
-		EXPECT_EQ(id, it->index());
-		gtpu::ext::no_more const* p = it->select();
-		ASSERT_NE(nullptr, p);
-		++it;
-	}
-	ASSERT_EQ(ehs.end(), it);
-}
-
-TEST(encode, eh_chain)
+//only as example how to fill out
+TEST(encode, DISABLED_eh_chain)
 {
 	gtpu::proto proto;
 
@@ -569,6 +167,158 @@ TEST(encode, eh_chain)
 	}
 }
 
+
+TEST_P(Gtpu, codec)
+{
+	std::size_t alloc_buf[1024];
+	med::allocator alloc{alloc_buf};
+
+	gtpu::proto proto;
+
+	auto& msg = GetParam().msg;
+	{
+		med::decoder_context<med::allocator> ctx{msg.begin(), msg.size(), &alloc};
+		decode(med::octet_decoder{ctx}, proto);
+
+		auto& opt_header = proto.header().ref<gtpu::opt_header>();
+		if (!(proto.header().vf() & gtpu::version_flags::S))
+		{
+			opt_header.ref<gtpu::sequence_number>().clear();
+		}
+		if (!(proto.header().vf() & gtpu::version_flags::NP))
+		{
+			opt_header.ref<gtpu::npdu_number>().clear();
+		}
+		if (!(proto.header().vf() & gtpu::version_flags::E))
+		{
+			opt_header.ref<gtpu::ext::header>().clear();
+		}
+	}
+
+	{
+		uint8_t buffer[1024];
+		med::encoder_context<> ctx{buffer};
+
+		encode(med::octet_encoder{ctx}, proto);
+		EXPECT_EQ(msg.size(), ctx.buffer().get_offset());
+		EXPECT_TRUE(Matches(msg.begin(), buffer, msg.size()));
+	}
+
+}
+
+msg_data_s const messages[] = {
+	{"echo-request", {
+		0x32, //version,flags(S)
+		1, //message type
+		0,12, //length
+		0,0,0,0, //teid
+		0,1, //sn (+S-flag)
+		0, //npdu number
+		0, //next eh type
+		0xFF, //tag=private extension
+		0,5, //length
+		0,45, //extension id
+		1,2,3 //extension value
+	}},
+	{"echo-response", {
+		0x32, //version,flags(S)
+		2, //message type
+		0,6, //length
+		0,0,0,0, //teid
+		0,1, //sn (+S-flag)
+		0, //npdu number
+		0, //next eh type
+		14, //tag=recovery
+		45, //reset counter
+	}},
+	{"error-ind", {
+		0x30, //version,flags(-)
+		26, //message type
+		0,12, //length
+		0,0,0,0, //teid
+		16, //tag=teid data
+		1,2,3,4,
+		133, //tag=peer address
+		0,4, //len
+		192,168,1,3, //IPv4
+	}},
+	{"supported-eh", {
+		0x30, //version,flags(.)
+		31, //message type
+		0,5, //length
+		0,0,0,0, //teid
+		141, //tag=list
+		3, //len
+		1,3,7, //eh type(s)
+	}},
+	{"end-marker", {
+		0x30, //version,flags(-)
+		0xFE, //message type
+		0,0, //length
+		0,0,0,0, //teid
+	}},
+	{"gpdu", {
+		0x30, //version,flags(-)
+		0xFF, //message type
+		0,5, //length
+		4,3,2,1, //teid
+		1,2,3,4,5 //G-PDU
+	}},
+	{"eh-chain", {
+		0x36, //version,flags(E+S)
+		0xFE, //message type
+		0,36, //length
+		0,0,0,0, //teid
+		0,1, //sn (+S-flag)
+		0, //npdu number
+		0x40, //next eh = UDP port
+		1, //4 octets
+		0x12,0x34, //port
+		0xC0, //next eh = PDCP PDU
+		1, //4 octets
+		0x87, 0x65,
+		0x82, //next eh = long PDCP PDU
+		2, //8 octets
+		0x03, 0x87, 0x65,
+		0,0,0, //spare
+		0x20, //next eh = SCI
+		1, //4 octets
+		0x37,
+		0, //spare
+		0x81, //next eh = RAN container
+		3, //12 octets
+		1,2,3,4,5,6,7,8,9,10,
+		0, // next eh = no_more
+	 }},
+	{"eh-chain-any", {
+		0x36, //version,flags(E+S)
+		0xFE, //message type
+		0,36, //length
+		0,0,0,0, //teid
+		0,1, //sn (+S-flag)
+		0, //npdu number
+		0x40, //next eh = UDP port
+		1, //4 octets
+		0x12,0x34, //port
+		0xC0, //next eh = PDCP PDU
+		1, //4 octets
+		0x87, 0x65,
+		0x82, //next eh = long PDCP PDU
+		2, //8 octets
+		0x03, 0x87, 0x65,
+		0,0,0, //spare
+		0x20, //next eh = SCI
+		1, //4 octets
+		0x37,
+		0, //spare
+		0x87, //next eh = unknown container
+		3, //12 octets
+		1,2,3,4,5,6,7,8,9,10,
+		0, // next eh = no_more
+	 }},
+};
+
+INSTANTIATE_TEST_SUITE_P(Suite, Gtpu, testing::ValuesIn(messages));
 
 int main(int argc, char **argv)
 {

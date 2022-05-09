@@ -130,11 +130,6 @@ constexpr bool required(uint8_t eh_type)    { return 0 != (eh_type & 0b10000000)
 //false: shall discard the Extension Header Content and not forward it to any Receiver Endpoint.
 constexpr bool forward(uint8_t eh_type)     { return 0 == (eh_type & 0b01000000); }
 
-struct any_tag : med::value<uint8_t>
-{
-	static constexpr bool match(value_type) { return true; }
-};
-
 struct no_more : med::empty<>
 {
 	static constexpr uint8_t id = 0b00000000;
@@ -272,7 +267,7 @@ Bits 8 to 1 of the octet 2 represent the binary coded value of the SCI, applicat
 Management treatment in GERAN shall be represented by the same value.
 The octet 2 is coded as shown in Table 5.2.2.3-1.
 Bits 8 to 1 of the octet 3 are spare bits and shall be set to zero.
-	Table 5.2.2.3-1: Service Class Indicator (SCI, octet 2)
+    Table 5.2.2.3-1: Service Class Indicator (SCI, octet 2)
 =======================================
 Bit-8 = 0        Operator-specific SCI
 ---------------------------------------
@@ -366,12 +361,20 @@ struct pdu_session_container : med::sequence<
 	uint8_t const* data() const                 { return this->get<container_data>().data(); }
 };
 
+struct any_tag : med::value<uint8_t>//, med::optional_t
+{
+	static constexpr char const* name()     { return "ANY"; }
+	static constexpr bool match(value_type) { return true; }
+};
+
 struct unknown : med::sequence<
+	M< any_tag >,
 	med::placeholder::_length<>,
 	M< container_data >
 >
+	, med::add_meta_info< med::mi<med::mik::TAG, any_tag> >
 {
-	static constexpr uint8_t id = 0b1000'0101;
+	//using ies_types = med::meta::list_rest_t<typename container_t::ies_types>;
 	using container_t::get;
 	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
 	std::size_t size() const                    { return this->get<container_data>().size(); }
@@ -388,11 +391,10 @@ struct header : med::choice<
 	CASE< xw_ran_container >,
 	CASE< nr_ran_container >,
 	CASE< pdu_session_container >,
-	M< any_tag, unknown >
+	M< unknown >
 >
 {
 	using length_type = ext::length;
-	//using padding = med::padding<uint32_t, true>; //pad to 4 octets inclusive
 #ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Extension Header"; }
 #endif
@@ -582,6 +584,7 @@ struct header : med::sequence<
 	std::size_t get_tag() const             { return get<message_type>().get(); }
 	void set_tag(std::size_t tag)           { ref<message_type>().set(tag); }
 
+	uint8_t vf() const                      { return get<version_flags>().get(); }
 	uint8_t version() const                 { return (vf() & version_flags::VER) >> 5; }
 	bool is_gtpu() const                    { return 0 != (vf() & version_flags::PT); }
 
@@ -595,9 +598,6 @@ struct header : med::sequence<
 	void npdu(npdu_number::value_type v)    { ref<opt_header>().ref<npdu_number>().set(v); }
 
 	static constexpr char const* name()     { return "Header"; }
-
-private:
-	uint8_t vf() const                      { return get<version_flags>().get(); }
 };
 
 /*
@@ -857,6 +857,20 @@ struct header_s
 		OE = 3, //offset for E
 		LH = OE+1, //additional size for long header
 	};
+
+	//TODO: replace with std::span (C++20)
+	struct payload_s
+	{
+		union{
+			uint8_t const*  rw{}; //read/write
+			uint8_t*        ro; //read-only
+		};
+		size_t const    size{};
+
+		explicit constexpr operator bool() const noexcept   { return !empty(); }
+		constexpr bool empty() const noexcept               { return 0 == size; }
+	};
+
 	uint8_t  flags;
 	uint8_t  message_type;
 	uint16_t m_length;
@@ -873,7 +887,9 @@ struct header_s
 	bool is_long() const        { return flags & (version_flags::E|version_flags::S|version_flags::NP); }
 
 	uint16_t length() const     { return ntohs(m_length);}
+	void length(uint16_t len)   { m_length = htons(len); }
 	uint32_t teid() const       { return ntohl(m_teid); }
+	void teid(uint32_t teid)    { m_teid = htonl(teid); }
 	uint16_t sn() const         { return has_sn() ? ((*beyond(OS) << 8) | *beyond(OS+1)) : 0; }
 	uint8_t npdu() const        { return has_np() ? *beyond(ON) : 0; }
 	uint8_t next_eh() const     { return has_eh() ? *beyond(OE) : 0; }
@@ -885,16 +901,16 @@ struct header_s
 	{
 		flags = 0x30;
 		message_type = g_pdu::id;
-		m_length = htons(payload_size);
-		m_teid = htonl(teid_);
+		length(payload_size);
+		teid(teid_);
 		return beyond(0);
 	}
 	uint8_t* gpdu(uint32_t teid_, uint16_t _sn, std::size_t payload_size)
 	{
 		flags = 0x30 | version_flags::S;
 		message_type = g_pdu::id;
-		m_length = htons(payload_size) + LH;
-		m_teid = htonl(teid_);
+		length(payload_size + LH) ;
+		teid(teid_);
 		*beyond(OS) = uint8_t(_sn >> 8);
 		*beyond(OS+1) = uint8_t(_sn);
 		*beyond(ON) = 0;
@@ -905,17 +921,41 @@ struct header_s
 	{
 		flags = 0x30 | version_flags::S | version_flags::NP;
 		message_type = g_pdu::id;
-		m_length = htons(payload_size) + LH;
-		m_teid = htonl(teid_);
-		*beyond(OS) = uint8_t(_sn >> 8);
+		length(payload_size + LH);
+		teid(teid_);
+		*beyond(OS)   = uint8_t(_sn >> 8);
 		*beyond(OS+1) = uint8_t(_sn);
-		*beyond(ON) = _np;
-		*beyond(OE) = 0;
+		*beyond(ON)   = _np;
+		*beyond(OE)   = 0;
 		return beyond(LH);
 	}
 
-	//returns pointer to G-PDU payload or nullptr
-	void const* gpdu() const    { return (is_gpdu() && 0 == next_eh()) ? beyond(is_long() ? LH:0) : nullptr; }
+	//returns G-PDU payload
+	payload_s gpdu() const
+	{
+		//return (is_gpdu() && 0 == next_eh()) ? beyond(is_long() ? LH:0) : nullptr;
+		if (is_gpdu())
+		{
+			if (0 == next_eh())
+			{
+				return {{beyond(is_long() ? LH : 0)},length()};
+			}
+
+			size_t payLoadOffset = OE+1; //we've checked EH, look at next byte (length)
+			if ( 0 == *beyond(payLoadOffset)) // check whether next ext len is not 0
+			{
+				return {};
+			}
+
+			do
+			{
+				payLoadOffset += (*beyond(payLoadOffset)) << 2;// skip header size itself * 4;// skip header container
+			} while ( *beyond(payLoadOffset-1));
+
+			return {{beyond(payLoadOffset)}, length() - payLoadOffset};
+		}
+		return {};
+	}
 
 private:
 	//access bytes beyond this
