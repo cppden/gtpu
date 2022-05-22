@@ -207,7 +207,7 @@ TEST_P(Gtpu, codec)
 }
 
 msg_data_s const messages[] = {
-	{"echo-request", {
+	{"echo-request", { //0
 		0x32, //version,flags(S)
 		1, //message type
 		0,12, //length
@@ -220,7 +220,7 @@ msg_data_s const messages[] = {
 		0,45, //extension id
 		1,2,3 //extension value
 	}},
-	{"echo-response", {
+	{"echo-response", { //1
 		0x32, //version,flags(S)
 		2, //message type
 		0,6, //length
@@ -231,7 +231,7 @@ msg_data_s const messages[] = {
 		14, //tag=recovery
 		45, //reset counter
 	}},
-	{"error-ind", {
+	{"error-ind", { //2
 		0x30, //version,flags(-)
 		26, //message type
 		0,12, //length
@@ -242,7 +242,7 @@ msg_data_s const messages[] = {
 		0,4, //len
 		192,168,1,3, //IPv4
 	}},
-	{"supported-eh", {
+	{"supported-eh", { //3
 		0x30, //version,flags(.)
 		31, //message type
 		0,5, //length
@@ -251,22 +251,22 @@ msg_data_s const messages[] = {
 		3, //len
 		1,3,7, //eh type(s)
 	}},
-	{"end-marker", {
+	{"end-marker", { //4
 		0x30, //version,flags(-)
 		0xFE, //message type
 		0,0, //length
 		0,0,0,0, //teid
 	}},
-	{"gpdu", {
+	{"gpdu", { //5
 		0x30, //version,flags(-)
 		0xFF, //message type
 		0,5, //length
 		4,3,2,1, //teid
 		1,2,3,4,5 //G-PDU
 	}},
-	{"eh-chain", {
+	{"eh-chain", { //6
 		0x36, //version,flags(E+S)
-		0xFE, //message type
+		0xFE, //message type = End Marker
 		0,36, //length
 		0,0,0,0, //teid
 		0,1, //sn (+S-flag)
@@ -290,7 +290,7 @@ msg_data_s const messages[] = {
 		1,2,3,4,5,6,7,8,9,10,
 		0, // next eh = no_more
 	 }},
-	{"eh-chain-any", {
+	{"eh-chain-any", { //7
 		0x36, //version,flags(E+S)
 		0xFE, //message type
 		0,36, //length

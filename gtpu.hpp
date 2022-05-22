@@ -28,6 +28,10 @@ template <typename ...T>
 using M = med::mandatory<T...>;
 template <typename ...T>
 using O = med::optional<T...>;
+template <uint8_t TAG>
+using T = med::value<med::fixed<TAG, uint8_t>>;
+template <class T>
+using L = med::length_t<T>;
 template <class T>
 using CASE = M<med::value<med::fixed<T::id, uint8_t>>, T>;
 
@@ -130,21 +134,18 @@ constexpr bool required(uint8_t eh_type)    { return 0 != (eh_type & 0b10000000)
 //false: shall discard the Extension Header Content and not forward it to any Receiver Endpoint.
 constexpr bool forward(uint8_t eh_type)     { return 0 == (eh_type & 0b01000000); }
 
-struct no_more : med::empty<>
-{
-	static constexpr uint8_t id = 0b00000000;
-};
+struct no_more : med::empty<> {};
 
-struct length : med::value<uint8_t, med::padding<uint32_t>> //in 4 octets
+struct length : med::value<uint8_t, med::padding<uint32_t, med::offset<2>>> //in 4 octets
 {
 	static void value_to_length(std::size_t& v)
 	{
-		v *= 4;
+		v = v * 4 - 2; //exclude tag + len bytes
 	}
 
 	static void length_to_value(std::size_t& v)
 	{
-		v = (v+3) / 4;
+		v = (v + 5) / 4; //include tag + len bytes
 	}
 
 #ifdef CODEC_TRACE_ENABLE
@@ -161,19 +162,9 @@ Octet|
  2-3 | UDP Port number
    4 | Next Extension Header Type
 */
-struct udp_port_number : med::value<uint16_t>
+struct udp_port : med::value<uint16_t>
 {
-	static constexpr char const* name() { return "UDP Port Number"; }
-};
-struct udp_port : med::sequence<
-	med::placeholder::_length<>,
-	M< udp_port_number >
->
-{
-	static constexpr uint8_t id = 0b01000000;
-	using container_t::get;
-	udp_port_number::value_type get() const { return get<udp_port_number>().get(); }
-	void set(udp_port_number::value_type v) { ref<udp_port_number>().set(v); }
+    static constexpr char const* name() { return "UDP Port Number"; }
 };
 
 /*
@@ -190,19 +181,9 @@ Octet|
  2-3 | PDCP PDU number
    4 | Next Extension Header Type
 */
-struct pdcp_pdu_number : med::value<uint16_t>
+struct pdcp_pdu : med::value<uint16_t>
 {
-	static constexpr char const* name() { return "PDCP PDU Number"; }
-};
-struct pdcp_pdu : med::sequence<
-	med::placeholder::_length<>,
-	M< pdcp_pdu_number >
->
-{
-	static constexpr uint8_t id = 0b11000000;
-	using container_t::get;
-	pdcp_pdu_number::value_type get() const { return get<pdcp_pdu_number>().get(); }
-	void set(pdcp_pdu_number::value_type v) { ref<pdcp_pdu_number>().set(v); }
+    static constexpr char const* name() { return "PDCP PDU Number"; }
 };
 
 /*
@@ -224,21 +205,11 @@ Oct\Bit | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 |
  5-7    | Spare
  8      | Next Extension Header Type
 */
-struct long_pdcp_pdu_number : med::value<med::bits<24>>
+struct long_pdcp_pdu : med::value<med::bits<24>>
 {
 	value_type get() const              { return get_encoded() & 0x3FFFF; }
 	void set(value_type v)              { set_encoded(v & 0x3FFFF); }
 	static constexpr char const* name() { return "Long PDCP PDU Number"; }
-};
-struct long_pdcp_pdu : med::sequence<
-	med::placeholder::_length<>,
-	M< long_pdcp_pdu_number >
->
-{
-	static constexpr uint8_t id = 0b10000010;
-	using container_t::get;
-	long_pdcp_pdu_number::value_type get() const { return get<long_pdcp_pdu_number>().get(); }
-	void set(long_pdcp_pdu_number::value_type v) { ref<long_pdcp_pdu_number>().set(v); }
 };
 
 /*
@@ -281,21 +252,11 @@ Bits-7..1
 0000000..1111111 Spare for future use
 =======================================
 */
-struct sci_value : med::value<uint8_t>
+struct sci : med::value<uint8_t>
 {
 	static constexpr char const* name() { return "Service Class Indicator"; }
 	value_type get() const              { return get_encoded() & 0x7F; }
-};
-struct sci : med::sequence<
-	med::placeholder::_length<>,
-	M< sci_value >
->
-{
-	static constexpr uint8_t id = 0b00100000;
-	using container_t::get;
-	sci_value::value_type get() const   { return get<sci_value>().get(); }
-	void set(sci_value::value_type v)   { ref<sci_value>().set(v); }
-	bool specific() const               { return get<sci_value>().get() & 0x80; }
+	bool specific() const               { return !(get_encoded() & 0x80); }
 };
 
 /*
@@ -309,92 +270,53 @@ A G-PDU message with this extension header may be sent without a T-PDU.
 2-(4N-1)| RAN Container
    4N   | Next Extension Header Type
 */
-struct container_data : med::octet_string<>
+struct container_data : med::octet_string<> {};
+
+struct ran_container : container_data
 {
 	static constexpr char const* name() { return "RAN Container"; }
 };
-struct ran_container : med::sequence<
-	med::placeholder::_length<>,
-	M< container_data >
->
+
+struct xw_ran_container : container_data
 {
-	static constexpr uint8_t id = 0b10000001;
-	using container_t::get;
-	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
-	std::size_t size() const                    { return this->get<container_data>().size(); }
-	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+	static constexpr char const* name() { return "Xw RAN Container"; }
 };
 
-struct xw_ran_container : med::sequence<
-	med::placeholder::_length<>,
-	M< container_data >
->
+struct nr_ran_container : container_data
 {
-	static constexpr uint8_t id = 0b1000'0011;
-	using container_t::get;
-	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
-	std::size_t size() const                    { return this->get<container_data>().size(); }
-	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+	static constexpr char const* name() { return "NR RAN Container"; }
 };
 
-struct nr_ran_container : med::sequence<
-	med::placeholder::_length<>,
-	M< container_data >
->
+struct pdu_session_container : container_data
 {
-	static constexpr uint8_t id = 0b1000'0100;
-	using container_t::get;
-	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
-	std::size_t size() const                    { return this->get<container_data>().size(); }
-	uint8_t const* data() const                 { return this->get<container_data>().data(); }
-};
-
-struct pdu_session_container : med::sequence<
-	med::placeholder::_length<>,
-	M< container_data >
->
-{
-	static constexpr uint8_t id = 0b1000'0101;
-	using container_t::get;
-	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
-	std::size_t size() const                    { return this->get<container_data>().size(); }
-	uint8_t const* data() const                 { return this->get<container_data>().data(); }
+	static constexpr char const* name() { return "PDU Session Container"; }
 };
 
 struct any_tag : med::value<uint8_t>//, med::optional_t
 {
-	static constexpr char const* name()     { return "ANY"; }
+	static constexpr char const* name()     { return "Any"; }
 	static constexpr bool match(value_type) { return true; }
 };
 
 struct unknown : med::sequence<
 	M< any_tag >,
-	med::placeholder::_length<>,
 	M< container_data >
 >
-	, med::add_meta_info< med::mi<med::mik::TAG, any_tag> >
-{
-	//using ies_types = med::meta::list_rest_t<typename container_t::ies_types>;
-	using container_t::get;
-	void set(std::size_t len, void const* data) { this->ref<container_data>().set(len, data); }
-	std::size_t size() const                    { return this->get<container_data>().size(); }
-	uint8_t const* data() const                 { return this->get<container_data>().data(); }
-};
+{};
 
 struct header : med::choice<
-	CASE< no_more >,
-	CASE< udp_port >,
-	CASE< pdcp_pdu >,
-	CASE< long_pdcp_pdu >,
-	CASE< sci >,
-	CASE< ran_container >,
-	CASE< xw_ran_container >,
-	CASE< nr_ran_container >,
-	CASE< pdu_session_container >,
-	M< unknown >
+	M< T<0b0000'0000>, no_more >,
+	M< T<0b0100'0000>, L<ext::length>, udp_port >,
+	M< T<0b1100'0000>, L<ext::length>, pdcp_pdu >,
+	M< T<0b1000'0010>, L<ext::length>, long_pdcp_pdu >,
+	M< T<0b0010'0000>, L<ext::length>, sci >,
+	M< T<0b1000'0001>, L<ext::length>, ran_container >,
+	M< T<0b1000'0011>, L<ext::length>, xw_ran_container >,
+	M< T<0b1000'0100>, L<ext::length>, nr_ran_container >,
+	M< T<0b1000'0101>, L<ext::length>, pdu_session_container >,
+	M< any_tag, L<ext::length>, unknown >
 >
 {
-	using length_type = ext::length;
 #ifdef CODEC_TRACE_ENABLE
 	static constexpr char const* name() { return "Extension Header"; }
 #endif
@@ -649,7 +571,7 @@ The encoded address might belong not only to a GSN, but also to an RNC, eNodeB, 
 struct peer_address : med::octet_string<med::octets_var_intern<16>, med::min<4>>
 {
 	using tag = med::value<med::fixed<133, uint8_t>>;
-	using length = med::length_t<med::value<uint16_t>>;
+	using length = med::value<uint16_t>;
 
 	static constexpr char const* name()         { return "Peer Address"; }
 	template <std::size_t N>
@@ -679,7 +601,7 @@ struct eh_type_list : med::sequence<
 >
 {
 	using tag = med::value<med::fixed<141, uint8_t>>;
-	using length = med::length_t<med::value<uint8_t>>;
+	using length = med::value<uint8_t>;
 	static constexpr char const* name() { return "Extension Header Type List"; }
 };
 
@@ -706,7 +628,7 @@ struct private_extension : med::sequence<
 >
 {
 	using tag = med::value<med::fixed<255, uint8_t>>;
-	using length = med::length_t<med::value<uint16_t>>;
+	using length = med::value<uint16_t>;
 	static constexpr char const* name() { return "Private Extension"; }
 };
 
@@ -728,7 +650,7 @@ over X2, Echo Request path maintenance message shall not be sent except if the f
 sent over the same path.
 */
 struct echo_request : med::sequence<
-	O< private_extension::tag, private_extension::length, private_extension, med::inf >
+	O< private_extension::tag, L<private_extension::length>, private_extension, med::inf >
 >
 {
 	static constexpr uint8_t id = 1;
@@ -745,7 +667,7 @@ The optional Private Extension contains vendor or operator specific information.
 */
 struct echo_response : med::sequence<
 	M< recovery::tag, recovery >,
-	O< private_extension::tag, private_extension::length, private_extension, med::inf >
+	O< private_extension::tag, L<private_extension::length>, private_extension, med::inf >
 >
 {
 	static constexpr uint8_t id = 2;
@@ -763,7 +685,7 @@ Implementers should avoid repeated attempts to use unknown extension headers wit
 inability to interpret them.
 */
 struct supported_eh : med::sequence<
-	M< eh_type_list::tag, eh_type_list::length, eh_type_list >
+	M< eh_type_list::tag, L<eh_type_list::length>, eh_type_list >
 >
 {
 	static constexpr uint8_t id = 31;
@@ -790,8 +712,8 @@ related PDP context, RAB or EPS bearer in the receiving node.
 */
 struct error_indication : med::sequence<
 	M< teid_data::tag, teid_data >,
-	M< peer_address::tag, peer_address::length, peer_address >,
-	O< private_extension::tag, private_extension::length, private_extension, med::inf >
+	M< peer_address::tag, L<peer_address::length>, peer_address >,
+	O< private_extension::tag, L<private_extension::length>, private_extension, med::inf >
 >
 {
 	static constexpr uint8_t id = 26;
@@ -819,7 +741,7 @@ The MME shall discard the End Marker packets. The MME may also initiate the rele
 resources; however the release of the S11-U resources is implementation dependent.
 */
 struct end_marker : med::sequence<
-	O< private_extension::tag, private_extension::length, private_extension, med::inf >
+	O< private_extension::tag, L<private_extension::length>, private_extension, med::inf >
 >
 {
 	static constexpr uint8_t id = 254;
